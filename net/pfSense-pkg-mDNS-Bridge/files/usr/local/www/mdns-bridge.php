@@ -59,12 +59,12 @@ if ($_POST) {
 
 	// Check for Avahi conflict
 	if ($pconfig['enable'] && $avahi_enabled) {
-		$input_errors[] = 'Avahi relfection must be disabled before enabling mDNS Bridge';
+		$input_errors[] = gettext('Avahi relfection must be disabled before enabling mDNS Bridge');
 	}
 
 	// Validate interfaces
 	if (count($pconfig['active_interfaces']) < 2) {
-		$input_errors[] = 'A minimum of two interfaces are required';
+		$input_errors[] = gettest('A minimum of two interfaces are required');
 	}
 
 	// Vaidate and normalize the global filter
@@ -78,7 +78,7 @@ if ($_POST) {
 		foreach (explode(',', $pconfig['global_filter_list']) as $filter) {
 			$filter = trim($filter);
 			if (!is_domain($filter, false, false)) {
-				$input_errors[] = 'Invalid domain in Global Filter List: "' . $filter . '"';
+				$input_errors[] = sprintf(gettext('Invalid domain in Global Filter List: "%1$s"'), $filter);
 			}
 			$filter_list[] = $filter;
 		}
@@ -98,9 +98,8 @@ if ($_POST) {
 			foreach (explode(',', $pconfig['inbound_filter_list_' . $interface]) as $filter) {
 				$filter = trim($filter);
 				if (!is_domain($filter, false, false)) {
-					$input_errors[] = 'Invalid domain in Interface ' .
-					convert_friendly_interface_to_friendly_descr($interface) .
-					' Inbound Filter List: "' . $filter . '"';
+					$input_errors[] = sprintf(gettext('Invalid domain in %1$s Inbound Filter List: "%2$s"'),
+						convert_friendly_interface_to_friendly_descr($interface), $filter);
 				}
 				$filter_list[] = $filter;
 			}
@@ -118,9 +117,8 @@ if ($_POST) {
 			foreach (explode(',', $pconfig['outbound_filter_list_' . $interface]) as $filter) {
 				$filter = trim($filter);
 				if (!is_domain($filter, false, false)) {
-					$input_errors[] = 'Invalid domain in Interface ' .
-					convert_friendly_interface_to_friendly_descr($interface) .
-					' Outbound Filter List: "' . $filter . '"';
+					$input_errors[] = sprintf(gettext('Invalid domain in %1$s Outbound Filter List: "%2$s"'),
+						convert_friendly_interface_to_friendly_descr($interface), $filter);
 				}
 				$filter_list[] = $filter;
 			}
