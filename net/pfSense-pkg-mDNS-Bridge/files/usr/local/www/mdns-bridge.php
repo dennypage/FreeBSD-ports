@@ -3,7 +3,7 @@
  * mdns-bridge.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2024-2025 Denny Page
+ * Copyright (c) 2024-2026 Denny Page
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -34,7 +34,6 @@ $path_decode_warnings = 'decode_warnings';
 $path_global_ip_protocols = 'global_ip_protocols';
 $path_global_filter_type = 'global_filter_type';
 $path_global_filter_list = 'global_filter_list';
-$path_disable_packet_filtering = 'disable_packet_filtering';
 $path_interfaces = 'interfaces';
 
 // Get the current configuration
@@ -46,7 +45,6 @@ $pconfig['decode_warnings'] = array_get_path($current_config, $path_decode_warni
 $pconfig['global_ip_protocols'] = array_get_path($current_config, $path_global_ip_protocols, 'both');
 $pconfig['global_filter_type'] = array_get_path($current_config, $path_global_filter_type, 'none');
 $pconfig['global_filter_list'] = array_get_path($current_config, $path_global_filter_list, '');
-$pconfig['disable_packet_filtering'] = array_get_path($current_config, $path_disable_packet_filtering, false);
 $pconfig['interfaces'] = array_get_path($current_config, $path_interfaces, []);
 
 // Avahi conflict
@@ -77,61 +75,143 @@ if ($_POST) {
 	}
 
 	// Validate and normalize the global filter
-	if ($pconfig['global_filter_type'] != 'none' && trim($pconfig['global_filter_list']) == '') {
-		$pconfig['global_filter_type'] = 'none';
-		$pconfig['global_filter_list'] = '';
-	}
-	if ($pconfig['global_filter_type'] != 'none') {
-		$pconfig['disable_packet_filtering'] = false;
-		$filter_list = array();
-		foreach (array_filter(explode(',', $pconfig['global_filter_list'])) as $filter) {
-			$filter = trim($filter);
-			if (!is_domain($filter, false, false)) {
-				$input_errors[] = sprintf(gettext('Invalid domain in Global Filter List: "%1$s"'), $filter);
-			}
-			$filter_list[] = $filter;
+	$type = $pconfig['global_filter_type'];
+	if ($type == 'allow' || $type == 'deny') {
+		$list = trim($pconfig['global_filter_list']);
+		if ($list == '') {
+			$pconfig['global_filter_type'] = 'none';
+			$pconfig['global_filter_list'] = '';
 		}
-		$pconfig['global_filter_list'] = implode(', ', $filter_list);
+		else if ($list == '<all>') {
+			if ($type == 'allow') {
+				$pconfig['global_filter_type'] = 'none';
+			}
+			else {
+				$input_errors[] = sprintf(gettext('"%1$s" is an invalid Global Filter'), $list);
+			}
+		}
+		else {
+			$filter_list = array();
+			foreach (array_filter(explode(',', $list)) as $filter) {
+				$filter = trim($filter);
+				if (str_contains($filter, '..')) {
+					$input_errors[] = sprintf(gettext('Invalid name in Global Filter List: "%1$s"'), $filter);
+				}
+				$filter_list[] = $filter;
+			}
+			$pconfig['global_filter_list'] = implode(', ', $filter_list);
+		}
 	}
 
 	// Validate and normalize the interface filters
 	foreach ($pconfig['active_interfaces'] as $interface) {
 		// Inbound filter
-		if ($pconfig['inbound_filter_type_' . $interface] != 'none' && trim($pconfig['inbound_filter_list_' . $interface]) == '') {
-			$pconfig['inbound_filter_type_' . $interface] = 'none';
-			$pconfig['inbound_filter_list_' . $interface] = '';
-		}
-		if ($pconfig['inbound_filter_type_' . $interface] != 'none') {
-			$pconfig['disable_packet_filtering'] = false;
-			$filter_list = array();
-			foreach (array_filter(explode(',', $pconfig['inbound_filter_list_' . $interface])) as $filter) {
-				$filter = trim($filter);
-				if (!is_domain($filter, false, false)) {
-					$input_errors[] = sprintf(gettext('Invalid domain in %1$s Inbound Filter List: "%2$s"'),
-						convert_friendly_interface_to_friendly_descr($interface), $filter);
-				}
-				$filter_list[] = $filter;
+		$type = $pconfig['inbound_filter_type_' . $interface];
+		if ($type == 'allow' || $type == 'deny') {
+			$list = trim($pconfig['inbound_filter_list_' . $interface]);
+			if ($list == '') {
+				$pconfig['inbound_filter_type_' . $interface] = 'none';
+				$pconfig['inbound_filter_list_' . $interface] = '';
 			}
-			$pconfig['inbound_filter_list_' . $interface] = implode(', ', $filter_list);
+			else if ($list == '<all>') {
+				if ($type == 'allow') {
+					$pconfig['inbound_filter_type_' . $interface] = 'none';
+				}
+				else {
+					$pconfig['inbound_filter_type_' . $interface] = 'deny_all';
+				}
+				$pconfig['inbound_filter_list_' . $interface] = '';
+			}
+			else {
+				$filter_list = array();
+				foreach (array_filter(explode(',', $list)) as $filter) {
+					$filter = trim($filter);
+					if (str_contains($filter, '..')) {
+						$input_errors[] = sprintf(gettext('Invalid name in %1$s -> Inbound Filter List: "%2$s"'),
+							convert_friendly_interface_to_friendly_descr($interface), $filter);
+					}
+					$filter_list[] = $filter;
+				}
+				$pconfig['inbound_filter_list_' . $interface] = implode(', ', $filter_list);
+			}
 		}
 
 		// Outbound filter
-		if ($pconfig['outbound_filter_type_' . $interface] != 'none' && trim($pconfig['outbound_filter_list_' . $interface]) == '') {
-			$pconfig['outbound_filter_type_' . $interface] = 'none';
-			$pconfig['outbound_filter_list_' . $interface] = '';
-		}
-		if ($pconfig['outbound_filter_type_' . $interface] != 'none') {
-			$pconfig['disable_packet_filtering'] = false;
-			$filter_list = array();
-			foreach (array_filter(explode(',', $pconfig['outbound_filter_list_' . $interface])) as $filter) {
-				$filter = trim($filter);
-				if (!is_domain($filter, false, false)) {
-					$input_errors[] = sprintf(gettext('Invalid domain in %1$s Outbound Filter List: "%2$s"'),
-						convert_friendly_interface_to_friendly_descr($interface), $filter);
-				}
-				$filter_list[] = $filter;
+		$type = $pconfig['outbound_filter_type_' . $interface];
+		if ($type == 'allow' || $type == 'deny') {
+			$list = trim($pconfig['outbound_filter_list_' . $interface]);
+			if ($list == '') {
+				$pconfig['outbound_filter_type_' . $interface] = 'none';
+				$pconfig['outbound_filter_list_' . $interface] = '';
 			}
-			$pconfig['outbound_filter_list_' . $interface] = implode(', ', $filter_list);
+			else if ($list == '<all>') {
+				if ($type == 'allow') {
+					$pconfig['outbound_filter_type_' . $interface] = 'none';
+				}
+				else {
+					$pconfig['outbound_filter_type_' . $interface] = 'deny_all';
+				}
+				$pconfig['outbound_filter_list_' . $interface] = '';
+			}
+			else {
+				$filter_list = array();
+				foreach (array_filter(explode(',', $list)) as $filter) {
+					$filter = trim($filter);
+					if (str_contains($filter, '..')) {
+						$input_errors[] = sprintf(gettext('Invalid name in %1$s -> Outbound Filter List: "%2$s"'),
+							convert_friendly_interface_to_friendly_descr($interface), $filter);
+					}
+					$filter_list[] = $filter;
+				}
+				$pconfig['outbound_filter_list_' . $interface] = implode(', ', $filter_list);
+			}
+		}
+
+		// Peer filters
+		$found_peers = 0;
+		foreach ($pconfig['active_interfaces'] as $peer) {
+			if ($peer == $interface) {
+				continue;
+			}
+			$type = $pconfig['peer_filter_type_' . $interface . '_' . $peer];
+			if ($type == 'allow' || $type == 'deny') {
+				$list = trim($pconfig['peer_filter_list_' . $interface . '_' . $peer]);
+				if ($list == '') {
+					$pconfig['peer_filter_type_' . $interface . '_' . $peer] = 'none';
+					$pconfig['peer_filter_list_' . $interface . '_' . $peer] = '';
+				}
+				else if ($list == '<all>') {
+					if ($type == 'allow') {
+						$pconfig['peer_filter_type_' . $interface . '_' . $peer] = 'none';
+					}
+					else {
+						$pconfig['peer_filter_type_' . $interface . '_' . $peer] = 'deny_all';
+					}
+					$pconfig['peer_filter_list_' . $interface . '_' . $peer] = '';
+				}
+				else {
+					$filter_list = array();
+					foreach (array_filter(explode(',', $list)) as $filter) {
+						$filter = trim($filter);
+						if (str_contains($filter, '..')) {
+							$input_errors[] = sprintf(gettext('Invalid name in %1$s -> Peer Filter List %2$s: "%3$s"'),
+								convert_friendly_interface_to_friendly_descr($interface),
+								convert_friendly_interface_to_friendly_descr($peer),
+								$filter);
+						}
+						$filter_list[] = $filter;
+					}
+					$pconfig['peer_filter_list_' . $interface . '_' . $peer] = implode(', ', $filter_list);
+				}
+			}
+
+			if ($pconfig['peer_filter_type_' . $interface . '_' . $peer] != 'none') {
+				$found_peers = 1;
+			}
+		}
+		if (!$found_peers) {
+			// If no peer filters are actually defined, unset the enable flag
+			unset($pconfig['enable_peer_filters_' . $interface]);
 		}
 	}
 
@@ -142,6 +222,16 @@ if ($_POST) {
 		array_set_path($pconfig, "interfaces/{$interface}/inbound_filter_list", $pconfig['inbound_filter_list_' . $interface]);
 		array_set_path($pconfig, "interfaces/{$interface}/outbound_filter_type", $pconfig['outbound_filter_type_' . $interface]);
 		array_set_path($pconfig, "interfaces/{$interface}/outbound_filter_list", $pconfig['outbound_filter_list_' . $interface]);
+		array_set_path($pconfig, "interfaces/{$interface}/enable_peer_filters", $pconfig['enable_peer_filters_' . $interface]);
+		$peer_array = array();
+		foreach ($available_interfaces as $peer => $peer_name) {
+			if ($peer == $interface) {
+				continue;
+			}
+			array_set_path($peer_array, "{$peer}/filter_type", $pconfig['peer_filter_type_' . $interface . '_' . $peer]);
+			array_set_path($peer_array, "{$peer}/filter_list", $pconfig['peer_filter_list_' . $interface . '_' . $peer]);
+		}
+		array_set_path($pconfig, "interfaces/{$interface}/peers", $peer_array);
 	}
 
 	// Update the config
@@ -154,7 +244,6 @@ if ($_POST) {
 		array_set_path($current_config, $path_global_ip_protocols, $pconfig['global_ip_protocols']);
 		array_set_path($current_config, $path_global_filter_type, $pconfig['global_filter_type']);
 		array_set_path($current_config, $path_global_filter_list, $pconfig['global_filter_list']);
-		array_set_path($current_config, $path_disable_packet_filtering, $pconfig['disable_packet_filtering']);
 
 		// Interface settings
 		foreach ($pconfig['active_interfaces'] as $interface) {
@@ -163,6 +252,17 @@ if ($_POST) {
 			array_set_path($current_config, "{$path_interfaces}/{$interface}/inbound_filter_list", $pconfig['inbound_filter_list_' . $interface]);
 			array_set_path($current_config, "{$path_interfaces}/{$interface}/outbound_filter_type", $pconfig['outbound_filter_type_' . $interface]);
 			array_set_path($current_config, "{$path_interfaces}/{$interface}/outbound_filter_list", $pconfig['outbound_filter_list_' . $interface]);
+			array_set_path($current_config, "{$path_interfaces}/{$interface}/enable_peer_filters", $pconfig['enable_peer_filters_' . $interface]);
+			$peer_array = array();
+			foreach ($available_interfaces as $peer => $peer_name) {
+				if ($peer == $interface) {
+					continue;
+				}
+
+				array_set_path($peer_array, "{$peer}/filter_type", $pconfig['peer_filter_type_' . $interface . '_' . $peer]);
+				array_set_path($peer_array, "{$peer}/filter_list", $pconfig['peer_filter_list_' . $interface . '_' . $peer]);
+			}
+			array_set_path($current_config, "{$path_interfaces}/{$interface}/peers", $peer_array);
 		}
 
 		// Write the config
@@ -180,15 +280,28 @@ $ip_protocol_types = array(
 	'ipv4' => gettext('IPv4 only'),
 	'ipv6' => gettext('IPv6 only') );
 
-$filter_types = array(
-	'none' => gettext('none'),
-	'allow' => gettext('Allow'),
-	'deny' => gettext('Deny') );
+$global_filter_types = array(
+	'none' => gettext('All mDNS names are allowed'),
+	'allow' => gettext('mDNS names that match the filter list are allowed'),
+	'deny' => gettext('mDNS names that match the filter list are denied') );
+
+$interface_filter_types = array(
+	'none' => gettext('All mDNS names are allowed'),
+	'allow' => gettext('mDNS names that match the filter list are allowed'),
+	'deny' => gettext('mDNS names that match the filter list are denied'),
+	'deny_all' => gettext('All mDNS names are denied') );
+
+$peer_filter_types = array(
+	'none' => gettext('Disabled'),
+	'allow' => gettext('mDNS names that match the filter list are allowed'),
+	'deny' => gettext('mDNS names that match the filter list are denied'),
+	'deny_all' => gettext('All mDNS names are denied') );
 
 $filter_help_text = gettext(
 	'Comma separated list of mDNS names. Most often, a name should ' .
 	'be a single label representing a service name such as ' .
 	'_printer, _ipp, _ipps, _airplay, _hap, _http or _ssh.');
+
 $filter_placeholder_text = gettext('name1, name2, name3');
 
 
@@ -198,7 +311,6 @@ include("head.inc");
 if ($input_errors) {
 	print_input_errors($input_errors);
 }
-
 
 $form = new Form;
 $section = new Form_Section('General Settings');
@@ -246,39 +358,14 @@ $section->addInput(new Form_Select(
 	$ip_protocol_types
 ))->setHelp(gettext('Select which IP protocols mDNS Bridge will operate on.'));
 
-
 // Global filter type
-$group = new Form_Group('Global Filter');
+$group = new Form_Group('Global Filter Type');
 $group->add(new Form_Select(
 	'global_filter_type',
 	null,
 	$pconfig['global_filter_type'],
-	$filter_types
+	$global_filter_types
 ))->setHelp(gettext('The global filter is applied to incoming packets on all interfaces prior to any interface specific filters.'));
-$section->add($group);
-
-// Conditional text explaining the currently selected filter type
-$group = new Form_Group(null);
-$group->addClass('sh_global_filter_none');
-$group->add(new Form_StaticText(
-	null,
-	sprintf('<b>' . gettext('All mDNS names are allowed by default.') . '</b>')));
-$section->add($group);
-$group = new Form_Group(null);
-$group->addClass('sh_global_filter_allow');
-$group->add(new Form_StaticText(
-	null,
-	sprintf('<b>' . gettext('mDNS names that do not match an entry in the ' .
-		'Global Filter List will be dropped from packets received ' .
-		'on all interfaces.') . '</b>')));
-$section->add($group);
-$group = new Form_Group(null);
-$group->addClass('sh_global_filter_deny');
-$group->add(new Form_StaticText(
-	null,
-	sprintf('<b>' . gettext('mDNS names that match an entry in the ' .
-		'Global Filter List will be dropped from packets received ' .
-		'on all interfaces.') . '</b>')));
 $section->add($group);
 
 $group = new Form_Group('Global Filter List');
@@ -290,7 +377,6 @@ $group->add(new Form_Input(
 	$pconfig['global_filter_list']
 ))->setHelp($filter_help_text)->setWidth(7)->setAttribute('placeholder', $filter_placeholder_text);
 $section->add($group);
-
 $form->add($section);
 
 // Interface sections
@@ -313,38 +399,13 @@ foreach ($available_interfaces as $interface => $name) {
 	$section->add($group);
 
 	// Inbound filter type
-	$group = new Form_Group('Inbound Filter');
+	$group = new Form_Group('Inbound Filter Type');
 	$group->add(new Form_Select(
 		'inbound_filter_type_' . $interface,
 		null,
 		$interface_config['inbound_filter_type'],
-		$filter_types
+		$interface_filter_types
 	))->setHelp(gettext('The inbound filter is applied to packets received on the interface following the global filter.'));
-	$section->add($group);
-
-	// Conditional text explaining the currently selected inbound filter type
-	$group = new Form_Group(null);
-	$group->addClass('sh_interface_inbound_filter_none_' . $interface);
-	$group->add(new Form_StaticText(
-		null,
-		sprintf('<b>' . gettext('All mDNS names are allowed inbound on the interface.') .
-		'</b>')));
-	$section->add($group);
-	$group = new Form_Group(null);
-	$group->addClass('sh_interface_inbound_filter_allow_' . $interface);
-	$group->add(new Form_StaticText(
-		null,
-		sprintf('<b>' . gettext('mDNS names that do not match an entry in the ' .
-			'Inbound Filter List will be dropped from packets received on the ' .
-			'interface.') . '</b>')));
-	$section->add($group);
-	$group = new Form_Group(null);
-	$group->addClass('sh_interface_inbound_filter_deny_' . $interface);
-	$group->add(new Form_StaticText(
-		null,
-		sprintf('<b>' . gettext('mDNS names that match an entry in the ' .
-			'Inbound Filter List will be dropped from packets received on the ' .
-			'interface.') . '</b>')));
 	$section->add($group);
 
 	$group = new Form_Group('Inbound Filter List');
@@ -353,44 +414,18 @@ foreach ($available_interfaces as $interface => $name) {
 		'inbound_filter_list_' . $interface,
 		null,
 		'text',
-		array_get_path($interface_config, 'inbound_filter_list',''))
+		array_get_path($interface_config, 'inbound_filter_list', ''))
 	)->setHelp($filter_help_text)->setWidth(7)->setAttribute('placeholder', $filter_placeholder_text);
 	$section->add($group);
 
-
 	// Outbound filter type
-	$group = new Form_Group('Outbound Filter');
+	$group = new Form_Group('Outbound Filter Type');
 	$group->add(new Form_Select(
 		'outbound_filter_type_' . $interface,
 		null,
 		$interface_config['outbound_filter_type'],
-		$filter_types
+		$interface_filter_types
 	))->setHelp(gettext('The outbound filter is applied to packets prior to sending packets on the interface.'));
-	$section->add($group);
-
-	// Conditional text explaining the currently selected outbound filter type
-	$group = new Form_Group(null);
-	$group->addClass('sh_interface_outbound_filter_none_' . $interface);
-	$group->add(new Form_StaticText(
-		null,
-		sprintf('<b>' . gettext('All mDNS names are allowed outbound on the interface.') .
-		'</b>')));
-	$section->add($group);
-	$group = new Form_Group(null);
-	$group->addClass('sh_interface_outbound_filter_allow_' . $interface);
-	$group->add(new Form_StaticText(
-		null,
-		sprintf('<b>' . gettext('mDNS names that do not match an entry in the ' .
-			'Outbound Filter List will be excluded from packets sent on the ' .
-			'interface.') . '</b>')));
-	$section->add($group);
-	$group = new Form_Group(null);
-	$group->addClass('sh_interface_outbound_filter_deny_' . $interface);
-	$group->add(new Form_StaticText(
-		null,
-		sprintf('<b>' . gettext('mDNS names that match an entry in the ' .
-			'Outbound Filter List will be excluded from packets sent on the ' .
-			'interface.') . '</b>')));
 	$section->add($group);
 
 	// Outbound filter list
@@ -400,23 +435,53 @@ foreach ($available_interfaces as $interface => $name) {
 		'outbound_filter_list_' . $interface,
 		null,
 		'text',
-		array_get_path($interface_config, 'outbound_filter_list',''))
+		array_get_path($interface_config, 'outbound_filter_list', ''))
 	)->setHelp($filter_help_text)->setWidth(7)->setAttribute('placeholder', $filter_placeholder_text);
 	$section->add($group);
 
+	// Peer specific outbound filters
+	$group = new Form_Group('Peer Filters');
+	$group->add(new Form_Checkbox(
+		'enable_peer_filters_' . $interface,
+		null,
+		'Enable peer specific outbound filters',
+		$interface_config['enable_peer_filters'],
+	))->setHelp(gettext('Enable the use of individual outbound filters based on the source interface of the mDNS packet. When enabled, a peer specific filter overrides (replaces) the interface outbound filter for packets that originate from the specified peer interface.'))->setWidth(7);
+	$section->add($group);
+
+	foreach ($available_interfaces as $peer => $peer_name) {
+		if ($peer == $interface) {
+			continue;
+		}
+		$peer_config = array_get_path($interface_config, "peers/{$peer}", []);
+
+		// Peer filter type
+		$group = new Form_Group('Peer Filter Type ' . $peer_name);
+		$group->addClass('sh_peer_' . $interface);
+		$group->addClass('sh_peer_filter_type_' . $interface . '_' . $peer);
+		$group->add(new Form_Select(
+			'peer_filter_type_' . $interface . '_' . $peer,
+			null,
+			$peer_config['filter_type'],
+			$peer_filter_types
+		))->setHelp(gettext('If enabled, this filter is used as the outbound filter for packets that originate from the peer interface.'));
+		$section->add($group);
+
+		// Peer filter list
+		$group = new Form_Group('Peer Filter List ' . $peer_name);
+		$group->addClass('sh_peer_' . $interface);
+		$group->addClass('sh_peer_filter_list_' . $interface . '_' . $peer);
+		$group->add(new Form_Input(
+			'peer_filter_list_' . $interface . '_' . $peer,
+			null,
+			'text',
+			array_get_path($peer_config, 'filter_list', ''))
+		)->setHelp($filter_help_text)->setWidth(7)->setAttribute('placeholder', $filter_placeholder_text);
+		$section->add($group);
+	}
+
 	$form->add($section);
 }
-
-// Advanced option to Disable all packet filtering
-$section = new Form_Section('Advanced');
-$section->addClass('sh_disable_packet_filtering');
-$section->addInput(new Form_Checkbox(
-	'disable_packet_filtering',
-	'Disable Packet Filtering',
-	'Completely disable packet decoding and filtering',
-	$pconfig['disable_packet_filtering']
-))->setHelp(gettext('Selecting this option will cause packets received from one interface to be forwarded directly to neighboring interfaces without any further processing. <b>This option disables all mDNS packet validation and filtering, including link local addresses. Use this option with extreme caution.</b>'));
-$form->add($section);
 
 print($form);
 ?>
@@ -427,7 +492,27 @@ print($form);
 events.push(function() {
 	var available_interfaces = <?=json_encode(array_keys($available_interfaces))?>;
 
-	// Show/hide interface sections
+	// Show/hide peer filter list based on peer filter type
+	function hidePeerFilterList(interface, peer) {
+		let type = $('#peer_filter_type_' + interface + '_' + peer).prop('value');
+		hideClass('sh_peer_filter_list_' + interface + '_' + peer, type == 'none' || type == 'deny_all');
+	}
+
+	// Show/hide peers for an interface based on enable peer filters
+	function hidePeers(interface) {
+		hideClass('sh_peer_' + interface, true);
+
+		if ($('#enable_peer_filters_' + interface).prop('checked')) {
+			var selected = $(".active_interfaces").val();
+			var length = $(".active_interfaces :selected").length;
+			for (var i = 0; i < length; i++) {
+				hideClass('sh_peer_filter_type_' + interface + '_' + selected[i], false);
+				hidePeerFilterList(interface, selected[i]);
+			}
+		}
+	}
+
+	// Show/hide interface sections base on selected interfaces
 	function hideInterfaces() {
 		hideClass('sh_interface', true);
 
@@ -435,6 +520,7 @@ events.push(function() {
 		var length = $(".active_interfaces :selected").length;
 		for (var i = 0; i < length; i++) {
 			hideClass('sh_interface_' + selected[i], false);
+			hidePeers(selected[i]);
 		}
 	}
 
@@ -443,43 +529,21 @@ events.push(function() {
 		hideClass('sh_interface_protocols', $('#global_ip_protocols').prop('value') != 'both');
 	}
 
-	// Show/hide advanced
-	function hideAdvanced() {
-		showadvanced = $('#global_filter_type').prop('value') == 'none';
-		if (showadvanced) {
-			var selected = $(".active_interfaces").val();
-			var length = $(".active_interfaces :selected").length;
-			for (var i = 0; i < length; i++) {
-				if ($('#inbound_filter_type_' + selected[i]).prop('value') != 'none' ||
-				    $('#outbound_filter_type_' + selected[i]).prop('value') != 'none') {
-					showadvanced = false;
-					break;
-				}
-			}
-		}
-		hideClass('sh_disable_packet_filtering', !showadvanced);
-	}
-
-	// Show/hide based on global filter
-	function hideGlobalFilter() {
-		hideClass('sh_global_filter_none', $('#global_filter_type').prop('value') != 'none');
-		hideClass('sh_global_filter_allow', $('#global_filter_type').prop('value') != 'allow');
-		hideClass('sh_global_filter_deny', $('#global_filter_type').prop('value') != 'deny');
+	// Show/hide global filter list based on global filter type
+	function hideGlobalFilterList() {
 		hideClass('sh_global_filter_list', $('#global_filter_type').prop('value') == 'none');
 	}
 
-	// Show/hide based on interface filters
-	function hideInterfaceFilter(interface, direction) {
-		hideClass('sh_interface_' + direction + '_filter_none_' + interface, ($('#' + direction + '_filter_type_' + interface).prop('value') != 'none'));
-		hideClass('sh_interface_' + direction + '_filter_allow_' + interface,($('#' + direction + '_filter_type_' + interface).prop('value') != 'allow'));
-		hideClass('sh_interface_' + direction + '_filter_deny_' + interface, ($('#' + direction + '_filter_type_' + interface).prop('value') != 'deny'));
-		hideClass('sh_interface_' + direction + '_filter_list_' + interface, ($('#' + direction + '_filter_type_' + interface).prop('value') == 'none'));
+	// Show/hide interface filter list based on interface filter type
+	function hideInterfaceFilterList(interface, direction) {
+		let type = $('#' + direction + '_filter_type_' + interface).prop('value');
+		hideClass('sh_interface_' + direction + '_filter_list_' + interface, type == 'none' || type == 'deny_all');
 	}
+
 
 	// On changing selection for active interfaces
 	$('.active_interfaces').change(function () {
 		hideInterfaces();
-		hideAdvanced();
 	});
 
 	// On changing selection for global ip protocols
@@ -487,39 +551,48 @@ events.push(function() {
 		hideInterfaceProtocols();
 	});
 
-	// On changing selection for global filter
+	// On changing selection for global filter type
 	$('#global_filter_type').change(function() {
-		hideGlobalFilter();
-		hideAdvanced();
+		hideGlobalFilterList();
 	});
 
-	// On changing selection for interface filters
+	// On changing selection for interface filter type
 	$("select[id^='inbound_filter_type_']").change(function() {
-		let result;
-		result = $(this).attr('id').match(/^inbound_filter_type_([\w]+)/);
+		let result = $(this).attr('id').match(/^inbound_filter_type_([\w]+)/);
 		if (result && available_interfaces.includes(result[1])) {
-			hideInterfaceFilter(result[1], 'inbound');
-			hideAdvanced();
+			hideInterfaceFilterList(result[1], 'inbound');
 		}
 	});
 	$("select[id^='outbound_filter_type_']").change(function() {
-		let result;
-		result = $(this).attr('id').match(/^outbound_filter_type_([\w]+)/);
+		let result = $(this).attr('id').match(/^outbound_filter_type_([\w]+)/);
 		if (result && available_interfaces.includes(result[1])) {
-			hideInterfaceFilter(result[1], 'outbound');
-			hideAdvanced();
+			hideInterfaceFilterList(result[1], 'outbound');
+		}
+	});
+
+	// On changing selection for enable peer filters
+	$("[id^='enable_peer_filters_']").change(function() {
+		let result = $(this).attr('id').match(/^enable_peer_filters_([\w]+)/);
+		if (result && available_interfaces.includes(result[1])) {
+			hidePeers(result[1]);
+		}
+	});
+
+	// On changing selection for peer filter type
+	$("select[id^='peer_filter_type_']").change(function() {
+		let result = $(this).attr('id').match(/^peer_filter_type_([\w]+)_([\w]+)/);
+		if (result && available_interfaces.includes(result[1])) {
+			hidePeerFilterList(result[1], result[2]);
 		}
 	});
 
 	// Initial page load
 	hideInterfaces();
 	hideInterfaceProtocols();
-	hideGlobalFilter();
-	hideAdvanced();
-
+	hideGlobalFilterList();
 	for (let interface of available_interfaces) {
-		hideInterfaceFilter(interface, 'inbound');
-		hideInterfaceFilter(interface, 'outbound');
+		hideInterfaceFilterList(interface, 'inbound');
+		hideInterfaceFilterList(interface, 'outbound');
 	}
 
 });

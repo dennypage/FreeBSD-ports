@@ -3,7 +3,7 @@
  * mdns-bridge.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2024-2025 Denny Page
+ * Copyright (c) 2024-2026 Denny Page
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -80,6 +80,7 @@ function mdns_bridge_write_files() {
 	$file_array[] = '[global]';
 	$file_array[] = 'interfaces = ' . implode(', ', $interfaces);
 
+	// IP protocols
 	$ip_protocols = array_get_path($current_config, 'global_ip_protocols');
 	switch ($ip_protocols) {
 		case 'ipv4':
@@ -90,6 +91,7 @@ function mdns_bridge_write_files() {
 			break;
 	}
 
+	// Global filter
 	$filter_type = array_get_path($current_config, 'global_filter_type');
 	$filter_list = array_get_path($current_config, 'global_filter_list');
 	switch ($filter_type) {
@@ -99,12 +101,6 @@ function mdns_bridge_write_files() {
 		case 'deny':
 			$file_array[] = 'deny-inbound-filters = ' . $filter_list;
 			break;
-		default:
-			$disable_packet_filtering = array_get_path($current_config, 'disable_packet_filtering');
-			if ($disable_packet_filtering)
-			{
-				$file_array['disable-packet-filtering'] = 'disable-packet-filtering = yes';
-			}
 	}
 
 
@@ -113,6 +109,7 @@ function mdns_bridge_write_files() {
 		$file_array[] = '';
 		$file_array[] = "[{$real_interface}]";
 
+		// Interface IP protocols
 		if (!$file_array['global_ip_protocols']) {
 			$ip_protocols = array_get_path($current_config, "interfaces/{$interface}/ip_protocols");
 			switch ($ip_protocols) {
@@ -125,30 +122,54 @@ function mdns_bridge_write_files() {
 			}
 		}
 
+		// Inbound filter
 		$filter_type = array_get_path($current_config, "interfaces/{$interface}/inbound_filter_type");
 		$filter_list = array_get_path($current_config, "interfaces/{$interface}/inbound_filter_list");
 		switch ($filter_type) {
 			case 'allow':
 				$file_array[] = 'allow-inbound-filters = ' . $filter_list;
-				unset($file_array['disable-packet-filtering']);
 				break;
 			case 'deny':
 				$file_array[] = 'deny-inbound-filters = ' . $filter_list;
-				unset($file_array['disable-packet-filtering']);
+				break;
+			case 'deny_all':
+				$file_array[] = 'deny-inbound-filters = <all>';
 				break;
 		}
 
+		// Outbound filter
 		$filter_type = array_get_path($current_config, "interfaces/{$interface}/outbound_filter_type");
 		$filter_list = array_get_path($current_config, "interfaces/{$interface}/outbound_filter_list");
 		switch ($filter_type) {
 			case 'allow':
 				$file_array[] = 'allow-outbound-filters = ' . $filter_list;
-				unset($file_array['disable-packet-filtering']);
 				break;
 			case 'deny':
 				$file_array[] = 'deny-outbound-filters = ' . $filter_list;
-				unset($file_array['disable-packet-filtering']);
 				break;
+			case 'deny_all':
+				$file_array[] = 'deny-outbound-filters = <all>';
+				break;
+		}
+
+		// Peer specific outbound filters
+		$enable_peer_filters = array_get_path($current_config, "interfaces/{$interface}/enable_peer_filters");
+		if ($enable_peer_filters) {
+			foreach ($interfaces as $peer => $real_peer) {
+				$filter_type = array_get_path($current_config, "interfaces/{$interface}/peers/{$peer}/filter_type");
+				$filter_list = array_get_path($current_config, "interfaces/{$interface}/peers/{$peer}/filter_list");
+				switch ($filter_type) {
+					case 'allow':
+					$file_array[] = 'peer-allow-outbound-filters = ' . $real_peer . ', ' . $filter_list;
+					break;
+					case 'deny':
+					$file_array[] = 'peer-deny-outbound-filters = ' . $real_peer . ', ' . $filter_list;
+					break;
+					case 'deny_all':
+					$file_array[] = 'peer-deny-outbound-filters = ' . $real_peer . ', <all>';
+					break;
+				}
+			}
 		}
 	}
 	$file_array[] = '';
